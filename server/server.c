@@ -152,9 +152,9 @@ void server_onconninit(tcpserver_t* server, size_t idx)
 	lsession_init(server->ls, idx);
 }
 
-void server_onpacket(tcpserver_t* server, size_t idx, const char* msg, size_t len)
+void server_onmessage(tcpserver_t* server, size_t idx, const char* msg, size_t len)
 {
-	lsession_onpacket(server->ls, idx, msg, len);
+	lsession_onmessage(server->ls, idx, msg, len);
 }
 
 void server_onconnclosing(tcpserver_t* server, size_t idx)

@@ -7,12 +7,6 @@ MSGTYPE_TIMER = 1
 --function sendmsg(id, msg)
 --function close(id)
 
---local function onlogin(session, msg)
---end
-
---local function onoffer(session, msg)
---end
-
 local function ontimer(session, msg)
     local date = os.date("%Y-%m-%d %H:%M:%S", msg.now)
     print("message from session[" .. session.id .. "]: " .. date)
@@ -24,17 +18,6 @@ local function ontimer(session, msg)
 --    end
 end
 
-local function onmessage(id, msg)
-    session = sessions[id]
-    if session == nil then
-        return
-    end
-    
-    if math.tointeger(msg.type) == MSGTYPE_TIMER then
-        ontimer(session, msg)
-    end
-end
-
 -- session init
 function oninit(id)
     session = {}
@@ -44,13 +27,21 @@ function oninit(id)
     print("session[" .. id .. "] init.")
 end
 
--- session receive data packet
-function onpacket(id, data)
+-- session receive message
+function onmessage(id, data)
     local msg = cjson.decode(data)
-    if msg then
-        onmessage(id, msg)
-    else
+    if msg == nil then
         print("invalid message")
+        return
+    end
+
+    session = sessions[id]
+    if session == nil then
+        return
+    end
+    
+    if math.tointeger(msg.type) == MSGTYPE_TIMER then
+        ontimer(session, msg)
     end
 end
 

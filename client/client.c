@@ -14,6 +14,12 @@ typedef struct client
 	char wbuf[1024];
 } client_t;
 
+typedef struct packet
+{
+	uint16_t msglen;
+	char msg[0];
+} packet_t;
+
 static client_t* client_new()
 {
 	client_t* client = (client_t*)malloc(sizeof(client_t));
@@ -46,15 +52,13 @@ void ontimer(uv_timer_t* handle)
 		return;
 	}
 
-	uint16_t* header = (uint16_t*)client->wbuf;
-	size_t header_len = sizeof(uint16_t);
-	char* msg = client->wbuf + header_len;
-	sprintf_s(msg, sizeof(client->wbuf) - header_len, "{\"type\": 1, \"now\": %u}", time(NULL));
-	*header = (uint16_t)strlen(msg);
+	packet_t* packet = (packet_t*)client->wbuf;
+	int len = sprintf_s(packet->msg, sizeof(client->wbuf) - sizeof(packet_t), "{\"type\": 1, \"now\": %u}", time(NULL));
+	packet->msglen = len;
 
 	uv_buf_t buf;
-	buf.base = client->wbuf;
-	buf.len = *header + header_len;
+	buf.base = (char*)packet;
+	buf.len = packet->msglen + sizeof(packet_t);
 	
 	client->wreq.data = client;
 	int ret = uv_write(&client->wreq, (uv_stream_t*)&client->handle, &buf, 1, afterwrite);
@@ -86,8 +90,10 @@ void onread(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf)
 		return;
 	}
 
-	buf->base[nread] = '\0';
-	printf("%s\n", buf->base + sizeof(uint16_t));
+	packet_t* packet = (packet_t*)buf->base;
+	assert(packet->msglen + sizeof(packet_t) == nread);
+	packet->msg[packet->msglen] = '\0';
+	printf("%s\n", packet->msg);
 }
 
 void onconnected(uv_connect_t* req, int status)

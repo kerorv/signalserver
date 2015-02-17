@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
 #include "lua/lua.h"
@@ -12,7 +13,7 @@ struct lsession
 {
 	lua_State* L;
 	int ref_oninit;
-	int ref_onpacket;
+	int ref_onmessage;
 	int ref_onclosing;
 };
 
@@ -27,7 +28,7 @@ lsession_t* lsession_new(tcpserver_t* server)
 	assert(ls);
 
 	ls->ref_oninit = LUA_NOREF;
-	ls->ref_onpacket = LUA_NOREF;
+	ls->ref_onmessage = LUA_NOREF;
 	ls->ref_onclosing = LUA_NOREF;
 
 	ls->L = luaL_newstate();
@@ -45,10 +46,10 @@ lsession_t* lsession_new(tcpserver_t* server)
 	registerfunction(ls->L, "sendmsg", lsession_sendmsg, server);
 	registerfunction(ls->L, "close", lsession_closeconn, server);
 	ls->ref_oninit = makefunctionref(ls->L, "oninit");
-	ls->ref_onpacket = makefunctionref(ls->L, "onpacket");
+	ls->ref_onmessage = makefunctionref(ls->L, "onmessage");
 	ls->ref_onclosing = makefunctionref(ls->L, "onbreak");
 	if (ls->ref_oninit == LUA_REFNIL ||
-		ls->ref_onpacket == LUA_REFNIL ||
+		ls->ref_onmessage == LUA_REFNIL ||
 		ls->ref_onclosing == LUA_REFNIL)
 	{
 		printf("makefunctionref fail.\n");
@@ -74,9 +75,9 @@ void lsession_init(lsession_t* ls, size_t id)
 	}
 }
 
-void lsession_onpacket(lsession_t* ls, size_t id, const char* packet, size_t len)
+void lsession_onmessage(lsession_t* ls, size_t id, const char* packet, size_t len)
 {
-	int type = lua_rawgeti(ls->L, LUA_REGISTRYINDEX, ls->ref_onpacket);
+	int type = lua_rawgeti(ls->L, LUA_REGISTRYINDEX, ls->ref_onmessage);
 	assert(type == LUA_TFUNCTION);
 
 	lua_pushinteger(ls->L, (lua_Integer)id);
@@ -86,6 +87,20 @@ void lsession_onpacket(lsession_t* ls, size_t id, const char* packet, size_t len
 	if (ret != LUA_OK)
 	{
 		printf("call lua onpacket() fail: 0x%x, %s\n", ret, lua_tostring(ls->L, -1));
+	}
+}
+
+void lsession_onclosing(lsession_t* ls, size_t id)
+{
+	int type = lua_rawgeti(ls->L, LUA_REGISTRYINDEX, ls->ref_onclosing);
+	assert(type == LUA_TFUNCTION);
+
+	lua_pushinteger(ls->L, (lua_Integer)id);
+
+	int ret = lua_pcall(ls->L, 1, 0, 0);
+	if (ret != LUA_OK)
+	{
+		printf("call lua onbreak() fail: 0x%x, %s\n", ret, lua_tostring(ls->L, -1));
 	}
 }
 
@@ -128,18 +143,4 @@ static int makefunctionref(lua_State* L, const char* name)
 {
 	lua_getglobal(L, name);
 	return luaL_ref(L, LUA_REGISTRYINDEX);
-}
-
-void lsession_onclosing(lsession_t* ls, size_t id)
-{
-	int type = lua_rawgeti(ls->L, LUA_REGISTRYINDEX, ls->ref_onclosing);
-	assert(type == LUA_TFUNCTION);
-
-	lua_pushinteger(ls->L, (lua_Integer)id);
-
-	int ret = lua_pcall(ls->L, 1, 0, 0);
-	if (ret != LUA_OK)
-	{
-		printf("call lua onbreak() fail: 0x%x, %s\n", ret, lua_tostring(ls->L, -1));
-	}
 }

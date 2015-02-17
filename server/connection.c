@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <stdint.h>
 #include "uv/uv.h"
 #include "server.h"
 #include "connection.h"
@@ -27,11 +28,17 @@ struct tcpconnection
 	int write_pending_count;
 };
 
+typedef struct packet
+{
+	uint16_t msglen;
+	char msg[0];
+} packet_t;
+
 void onallocbuffer(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf);
 void onread(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf);
 void afterwrite(uv_write_t* req, int status);
 void onclosed(uv_handle_t* handle);
-void onpacket(tcpconnection_t* conn, const char* packet, size_t len);
+void onpacket(tcpconnection_t* conn, packet_t* packet);
 int parsestream(tcpconnection_t* conn, const char* ptr, size_t len);
 
 tcpconnection_t* conn_new()
@@ -83,6 +90,9 @@ void conn_sendmsg(tcpconnection_t* conn, const char* msg, size_t len)
 {
 	if (len > MAX_MESSAGE_SIZE)
 	{
+		// drop message
+		// may be log here
+		// TODO
 		return;
 	}
 
@@ -97,12 +107,13 @@ void conn_sendmsg(tcpconnection_t* conn, const char* msg, size_t len)
 	write_req_t* wreq = (write_req_t*)malloc(sizeof(write_req_t));
 	wreq->req.data = conn;
 
-	size_t packet_len = len + sizeof(uint16_t);
-	wreq->buf.base = (char*)malloc(packet_len);
+	size_t packet_len = sizeof(packet_t) + len;
+	packet_t* packet = (packet_t*)malloc(packet_len);
+	packet->msglen = len;
+	memcpy(packet->msg, msg, len);
+
+	wreq->buf.base = (char*)packet;
 	wreq->buf.len = packet_len;
-	uint16_t* header = (uint16_t*)wreq->buf.base;
-	*header = (uint16_t)packet_len;
-	memcpy(wreq->buf.base + sizeof(uint16_t), msg, len);
 
 	int ret = uv_write(&wreq->req, (uv_stream_t*)&conn->handle, &wreq->buf, 1, afterwrite);
 	if (ret == 0)
@@ -170,6 +181,11 @@ static void onread(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf)
 		memmove(conn->readbuf, conn->readbuf + offset, conn->readpos);
 		conn->readpos -= offset;
 	}
+	else if (offset < 0)
+	{
+		// packet len is wrong.(==0 || > MAX_MESSAGE_SIZE)
+		conn_close(conn);
+	}
 }
 
 static void afterwrite(uv_write_t* req, int status)
@@ -194,9 +210,9 @@ static void onclosed(uv_handle_t* handle)
 	free(conn);
 }
 
-static void onpacket(tcpconnection_t* conn, const char* packet, size_t len)
+static void onpacket(tcpconnection_t* conn, packet_t* packet)
 {
-	server_onpacket(conn->server, conn->idx, packet, len);
+	server_onmessage(conn->server, conn->idx, packet->msg, packet->msglen);
 }
 
 static int parsestream(tcpconnection_t* conn, const char* ptr, size_t len)
@@ -204,15 +220,21 @@ static int parsestream(tcpconnection_t* conn, const char* ptr, size_t len)
 	if (len < sizeof(uint16_t))
 		return 0;
 
-	uint16_t msglen = *(uint16_t*)ptr;
-	if (len < msglen + sizeof(uint16_t))
+	packet_t* packet = (packet_t*)ptr;
+	if (packet->msglen == 0 || packet->msglen > MAX_MESSAGE_SIZE)
+		return -1;
+
+	if (len < packet->msglen + sizeof(uint16_t))
 		return 0;
 
-	onpacket(conn, ptr + sizeof(uint16_t), msglen);
+	onpacket(conn, packet);
 
-	size_t offset = sizeof(uint16_t) + msglen;
+	size_t offset = sizeof(uint16_t) + packet->msglen;
 	int suboff = parsestream(conn, ptr + offset, len - offset);
 	if (suboff > 0)
 		offset += suboff;
+	else if (suboff < 0)
+		return -1;
+
 	return offset;
 }
